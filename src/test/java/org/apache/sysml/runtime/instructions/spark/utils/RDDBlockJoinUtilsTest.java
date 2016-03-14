@@ -1,7 +1,5 @@
 package org.apache.sysml.runtime.instructions.spark.utils;
 
-import org.apache.flink.api.java.tuple.Tuple;
-import org.apache.flink.runtime.fs.hdfs.HadoopFileSystem;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
@@ -11,17 +9,15 @@ import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.mllib.random.RandomRDDs;
 import org.apache.spark.mllib.random.UniformGenerator;
 import org.apache.sysml.runtime.DMLRuntimeException;
+import org.apache.sysml.runtime.instructions.flink.utils.BlockJoinUtils;
 import org.apache.sysml.runtime.matrix.MatrixCharacteristics;
 import org.apache.sysml.runtime.matrix.data.MatrixBlock;
 import org.apache.sysml.runtime.matrix.data.MatrixIndexes;
-import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import scala.Tuple2;
 
 import java.io.File;
-import java.nio.file.Paths;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
@@ -148,7 +144,7 @@ public class RDDBlockJoinUtilsTest {
         JavaRDD<String> pk = sc.textFile(TMP_GEN_PK + "/part-00000");//.mapToPair(new KeySelector());
         JavaRDD<String> fk = sc.textFile(TMP_GEN_FK + "/part-00000");//.mapToPair(new KeySelector());
 
-        JavaPairRDD<MatrixIndexes, MatrixBlock> out = RDDBlockJoinUtils.csvBlockJoin(sc, pk, fk, mcOut, false, ",", false, 0.0);
+        JavaPairRDD<MatrixIndexes, MatrixBlock> out = RDDBlockJoinUtils.blockJoin(sc, pk, fk, mcOut, false, ",", false, 0.0);
         List<Tuple2<MatrixIndexes, MatrixBlock>> blocks = out.collect();
         sc.stop();
 
@@ -165,7 +161,7 @@ public class RDDBlockJoinUtilsTest {
         blockJoin.sort(new MatrixComparator());
         joinThenBlock.sort(new MatrixComparator());
 
-//        assertEquals(blockJoin, joinThenBlock);
+        assertEquals(blockJoin, joinThenBlock);
 
     }
 
@@ -186,10 +182,10 @@ public class RDDBlockJoinUtilsTest {
         JavaSparkContext sc = new JavaSparkContext(conf);
 
         // read
-        JavaRDD<String> pk = sc.textFile(TMP_GEN_PK + "/part-00000").map(new RemoveKey());
-        JavaRDD<String> fk = sc.textFile(TMP_GEN_FK + "/part-00000").map(new RemoveKey());
+        JavaRDD<String> pk = sc.textFile(TMP_GEN_PK + "/part-00000");//.map(new RemoveKey());
+        JavaRDD<String> fk = sc.textFile(TMP_GEN_FK + "/part-00000");//.map(new RemoveKey());
 
-        JavaPairRDD<MatrixIndexes, MatrixBlock> out = RDDBlockJoinUtils.csvBlockJoin(sc, pk, fk, mcOut, false, ",", false, 0.0);
+        JavaPairRDD<MatrixIndexes, MatrixBlock> out = RDDBlockJoinUtils.blockJoin(sc, pk, fk, mcOut, false, ",", false, 0.0);
         List<Tuple2<MatrixIndexes, MatrixBlock>> blocks = out.collect();
         sc.stop();
         long stop = System.nanoTime();
@@ -211,9 +207,9 @@ public class RDDBlockJoinUtilsTest {
         JavaPairRDD<Integer, String> pk = sc.textFile(TMP_GEN_PK + "/part-00000").mapToPair(new KeySelector());
         JavaPairRDD<Integer, String> fk = sc.textFile(TMP_GEN_FK + "/part-00000").mapToPair(new KeySelector());
         // join
-        JavaRDD<String> joined = pk.join(fk).map(new Concatenate());
+        JavaPairRDD<Integer, String> joined = pk.join(fk).mapValues(new ConcatenateValues()); //.map(new Concatenate());
 
-        JavaPairRDD<MatrixIndexes, MatrixBlock> out = RDDConverterUtils.csvToBinaryBlock(sc, joined, mcOut, false, ",", false, 0.0);
+        JavaPairRDD<MatrixIndexes, MatrixBlock> out = RDDBlockJoinUtils.csvToBlock(sc, joined, mcOut, false, ",", false, 0.0);
 
         List<Tuple2<MatrixIndexes, MatrixBlock>> blocks = out.collect();
         sc.stop();
@@ -228,6 +224,13 @@ public class RDDBlockJoinUtilsTest {
         @Override
         public String call(Tuple2<Integer, Tuple2<String, String>> in) throws Exception {
             return in._2()._1() + "," + in._2()._2();
+        }
+    }
+
+    static class ConcatenateValues implements Function<Tuple2<String,String>, String> {
+        @Override
+        public String call(Tuple2<String, String> in) throws Exception {
+            return in._1() + "," + in._2();
         }
     }
 

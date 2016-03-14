@@ -4,6 +4,8 @@ import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.spark.Accumulator;
+import org.apache.spark.AccumulatorParam;
+import org.apache.spark.Accumulators;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -26,131 +28,44 @@ import java.util.Iterator;
 
 public class RDDBlockJoinUtils {
 
-    public static final int HACK_BLOCKS_IN_FIRST_TABLE = 3;
+    public static JavaPairRDD<MatrixIndexes, MatrixBlock> csvToBlock(JavaSparkContext sc,
+                                                                     JavaPairRDD<Integer, String> input, MatrixCharacteristics mcOut,
+                                                                     boolean hasHeader, String delim, boolean fill, double fillValue)
+            throws DMLRuntimeException {
+
+        if (!mcOut.dimsKnown(true)) {
+            Accumulator<Long> aNnz = sc.accumulator(0L, new LongAccu());
+            JavaRDD<String> tmp = input.values().map(new Analyse(aNnz, delim));
+            long rlen = tmp.count() - (hasHeader ? 1 : 0);
+            long clen = tmp.first().split(delim).length;
+            long nnz = UtilFunctions.toLong(aNnz.value());
+            mcOut.set(rlen, clen, mcOut.getRowsPerBlock(), mcOut.getColsPerBlock(), nnz);
+        }
+
+//        JavaPairRDD<String, Long> prepinput = input.zipWithIndex(); //zip row index
+
+        //convert csv rdd to binary block rdd (w/ partial blocks)
+        JavaPairRDD<MatrixIndexes, MatrixBlock> out =
+                input.mapPartitionsToPair(new TuplesToPair(mcOut, delim, fill, fillValue));
+
+        out = RDDAggregateUtils.mergeByKey( out );
+
+        return out;
+    }
 
     public static JavaPairRDD<MatrixIndexes, MatrixBlock> blockJoin(JavaSparkContext sc,
                                                                     JavaRDD<String> i1,
                                                                     JavaRDD<String> i2,
-                                                                    final MatrixCharacteristics mcOut,
+                                                                    MatrixCharacteristics mcOut,
                                                                     boolean hasHeader,
                                                                     String delim,
                                                                     boolean fill,
-                                                                    double fillValue) throws DMLRuntimeException  {
-
-//        JavaPairRDD<Tuple2<Integer, Integer>, String> a = i1.mapToPair(new PairFunction<String, Tuple2<Integer, Integer>, String>() {
-//            @Override
-//            public Tuple2<Tuple2<Integer, Integer>, String> call(String in) throws Exception {
-//                String[] split = in.split(",");
-//                int resultIdx = split.length / mcOut.getColsPerBlock();
-//                return new Tuple2<Tuple2<Integer, Integer>, String>(
-//                        new Tuple2<Integer, Integer>(Integer.parseInt(split[0]) / mcOut.getRowsPerBlock(), resultIdx / mcOut.getColsPerBlock()),
-//                        in
-//                );
-//            }
-//        });
-
-        JavaPairRDD<MatrixIndexes, MatrixBlock> a = i1.mapPartitionsToPair(new TuplesToPair(mcOut, delim, fill, fillValue, 0));
-
-//        JavaPairRDD<Tuple2<Integer, Integer>, String> b = i2.mapToPair(new PairFunction<String, Tuple2<Integer, Integer>, String>() {
-//            @Override
-//            public Tuple2<Tuple2<Integer, Integer>, String> call(String in) throws Exception {
-//                String[] split = in.split(",");
-//                int resultIdx = HACK_BLOCKS_IN_FIRST_TABLE + split.length / mcOut.getColsPerBlock();
-//                return new Tuple2<Tuple2<Integer, Integer>, String>(
-//                        new Tuple2<Integer, Integer>(Integer.parseInt(split[0]) / mcOut.getRowsPerBlock(), resultIdx / mcOut.getColsPerBlock()),
-//                        in
-//                );
-//            }
-//        });
-        int offset = (int) Math.ceil(HACK_BLOCKS_IN_FIRST_TABLE / mcOut.getColsPerBlock());
-        JavaPairRDD<MatrixIndexes, MatrixBlock> b = i2.mapPartitionsToPair(new TuplesToPair(mcOut, delim, fill, fillValue, offset));
-
-        return a.cogroup(b).flatMapValues(new Function<Tuple2<Iterable<MatrixBlock>, Iterable<MatrixBlock>>, Iterable<MatrixBlock>>() {
-            @Override
-            public Iterable<MatrixBlock> call(Tuple2<Iterable<MatrixBlock>, Iterable<MatrixBlock>> tuple) throws Exception {
-                ArrayList<MatrixBlock> out = new ArrayList<MatrixBlock>();
-
-                Iterator<MatrixBlock> aItr = tuple._1().iterator();
-                MatrixBlock value = null;
-                if (aItr.hasNext()) {
-                    value = aItr.next();
-                    MatrixBlock b1 = new MatrixBlock(value);
-                    long b1Nz = b1.getNonZeros();
-                    while (aItr.hasNext()) {
-                        value = aItr.next();
-                        final MatrixBlock b2 = value;
-                        long b2Nz = b2.getNonZeros();
-
-                        if (b1.getNumRows() != b2.getNumRows() || b1.getNumColumns() != b2.getNumColumns()) {
-                            throw new DMLRuntimeException("Mismatched block sizes for: "
-                                    + b1.getNumRows() + " " + b1.getNumColumns() + " "
-                                    + b2.getNumRows() + " " + b2.getNumColumns());
-                        }
-
-                        // execute merge (never pass by reference)
-                        b1.merge(b2, false);
-                        b1.examSparsity();
-
-                        // sanity check output number of non-zeros
-                        if (b1.getNonZeros() != b1Nz + b2Nz) {
-                            throw new DMLRuntimeException("Number of non-zeros does not match: "
-                                    + b1.getNonZeros() + " != " + b1Nz + " + " + b2Nz);
-                        }
-                    }
-                    out.add(b1);
-                }
-
-                aItr = tuple._2().iterator();
-                if (aItr.hasNext()) {
-                    value = aItr.next();
-                    MatrixBlock b1 = new MatrixBlock(value);
-                    long b1Nz = b1.getNonZeros();
-                    while (aItr.hasNext()) {
-                        value = aItr.next();
-                        final MatrixBlock b2 = value;
-                        long b2Nz = b2.getNonZeros();
-
-                        if (b1.getNumRows() != b2.getNumRows() || b1.getNumColumns() != b2.getNumColumns()) {
-                            throw new DMLRuntimeException("Mismatched block sizes for: "
-                                    + b1.getNumRows() + " " + b1.getNumColumns() + " "
-                                    + b2.getNumRows() + " " + b2.getNumColumns());
-                        }
-
-                        // execute merge (never pass by reference)
-                        b1.merge(b2, false);
-                        b1.examSparsity();
-
-                        // sanity check output number of non-zeros
-                        if (b1.getNonZeros() != b1Nz + b2Nz) {
-                            throw new DMLRuntimeException("Number of non-zeros does not match: "
-                                    + b1.getNonZeros() + " != " + b1Nz + " + " + b2Nz);
-                        }
-                    }
-                    out.add(b1);
-                }
-                return out;
-            }
-        });
-
-//        JavaPairRDD<MatrixIndexes, MatrixBlock> x = getPartialAggregate(sc, i1, mcOut, hasHeader, delim, fill, fillValue, 0);
-//        int offset = (int) Math.ceil((double) mcOut.getCols() / mcOut.getColsPerBlock());
-//        JavaPairRDD<MatrixIndexes, MatrixBlock> y = getPartialAggregate(sc, i2, mcOut, hasHeader, delim, fill, fillValue, offset);
-//
-    }
-
-    public static JavaPairRDD<MatrixIndexes, MatrixBlock> csvBlockJoin(JavaSparkContext sc,
-                                                                           JavaRDD<String> i1,
-                                                                           JavaRDD<String> i2,
-                                                                           MatrixCharacteristics mcOut,
-                                                                           boolean hasHeader,
-                                                                           String delim,
-                                                                           boolean fill,
-                                                                           double fillValue) throws DMLRuntimeException {
+                                                                    double fillValue) throws DMLRuntimeException {
 
         // build blocks for inputs
-        JavaPairRDD<MatrixIndexes, MatrixBlock> x = getPartialAggregate(sc, i1, mcOut, hasHeader, delim, fill, fillValue, 0);
+        JavaPairRDD<MatrixIndexes, MatrixBlock> x = getPartialAggregate(sc, i1, mcOut, hasHeader, delim, fill, fillValue, 0, true);
         int offset = (int) Math.ceil((double) mcOut.getCols() / mcOut.getColsPerBlock());
-        JavaPairRDD<MatrixIndexes, MatrixBlock> y = getPartialAggregate(sc, i2, mcOut, hasHeader, delim, fill, fillValue, offset);
+        JavaPairRDD<MatrixIndexes, MatrixBlock> y = getPartialAggregate(sc, i2, mcOut, hasHeader, delim, fill, fillValue, offset, false);
 
         JavaPairRDD<MatrixIndexes, MatrixBlock> out = x.cogroup(y).flatMapValues(new Function<Tuple2<Iterable<MatrixBlock>, Iterable<MatrixBlock>>, Iterable<MatrixBlock>>() {
             @Override
@@ -168,21 +83,21 @@ public class RDDBlockJoinUtils {
                         final MatrixBlock b2 = value;
                         long b2Nz = b2.getNonZeros();
 
-                        if (b1.getNumRows() != b2.getNumRows() || b1.getNumColumns() != b2.getNumColumns()) {
-                            throw new DMLRuntimeException("Mismatched block sizes for: "
-                                    + b1.getNumRows() + " " + b1.getNumColumns() + " "
-                                    + b2.getNumRows() + " " + b2.getNumColumns());
-                        }
+//                        if (b1.getNumRows() != b2.getNumRows() || b1.getNumColumns() != b2.getNumColumns()) {
+//                            throw new DMLRuntimeException("Mismatched block sizes for: "
+//                                    + b1.getNumRows() + " " + b1.getNumColumns() + " "
+//                                    + b2.getNumRows() + " " + b2.getNumColumns());
+//                        }
 
                         // execute merge (never pass by reference)
                         b1.merge(b2, false);
                         b1.examSparsity();
 
-                        // sanity check output number of non-zeros
-                        if (b1.getNonZeros() != b1Nz + b2Nz) {
-                            throw new DMLRuntimeException("Number of non-zeros does not match: "
-                                    + b1.getNonZeros() + " != " + b1Nz + " + " + b2Nz);
-                        }
+//                        // sanity check output number of non-zeros
+//                        if (b1.getNonZeros() != b1Nz + b2Nz) {
+//                            throw new DMLRuntimeException("Number of non-zeros does not match: "
+//                                    + b1.getNonZeros() + " != " + b1Nz + " + " + b2Nz);
+//                        }
                     }
                     out.add(b1);
                 }
@@ -197,21 +112,21 @@ public class RDDBlockJoinUtils {
                         final MatrixBlock b2 = value;
                         long b2Nz = b2.getNonZeros();
 
-                        if (b1.getNumRows() != b2.getNumRows() || b1.getNumColumns() != b2.getNumColumns()) {
-                            throw new DMLRuntimeException("Mismatched block sizes for: "
-                                    + b1.getNumRows() + " " + b1.getNumColumns() + " "
-                                    + b2.getNumRows() + " " + b2.getNumColumns());
-                        }
+//                        if (b1.getNumRows() != b2.getNumRows() || b1.getNumColumns() != b2.getNumColumns()) {
+//                            throw new DMLRuntimeException("Mismatched block sizes for: "
+//                                    + b1.getNumRows() + " " + b1.getNumColumns() + " "
+//                                    + b2.getNumRows() + " " + b2.getNumColumns());
+//                        }
 
                         // execute merge (never pass by reference)
                         b1.merge(b2, false);
                         b1.examSparsity();
 
-                        // sanity check output number of non-zeros
-                        if (b1.getNonZeros() != b1Nz + b2Nz) {
-                            throw new DMLRuntimeException("Number of non-zeros does not match: "
-                                    + b1.getNonZeros() + " != " + b1Nz + " + " + b2Nz);
-                        }
+//                        // sanity check output number of non-zeros
+//                        if (b1.getNonZeros() != b1Nz + b2Nz) {
+//                            throw new DMLRuntimeException("Number of non-zeros does not match: "
+//                                    + b1.getNonZeros() + " != " + b1Nz + " + " + b2Nz);
+//                        }
                     }
                     out.add(b1);
                 }
@@ -225,27 +140,23 @@ public class RDDBlockJoinUtils {
 
     public static JavaPairRDD<MatrixIndexes, MatrixBlock> getPartialAggregate(JavaSparkContext sc,
                                                                               JavaRDD<String> input, MatrixCharacteristics mcOut,
-                                                                              boolean hasHeader, String delim, boolean fill, double fillValue, int offset)
+                                                                              boolean hasHeader, String delim, boolean fill, double fillValue, int offset, boolean analyse)
             throws DMLRuntimeException {
 
-        JavaPairRDD<LongWritable, Text> pair = input.mapToPair(new StringToSerTextFunction());
-
         if (!mcOut.dimsKnown(true)) {
-            Accumulator<Double> aNnz = sc.accumulator(0L);
-            JavaRDD<String> tmp = pair.values()
-                    .map(new CSVAnalysisFunction(aNnz, delim));
+            Accumulator<Long> aNnz = sc.accumulator(0L, new LongAccu());
+            JavaRDD<String> tmp = input.map(new Analyse(aNnz, delim));
             long rlen = tmp.count() - (hasHeader ? 1 : 0);
-            long clen = tmp.first().split(delim).length;
+            long clen = tmp.first().split(delim).length - 1;
             long nnz = UtilFunctions.toLong(aNnz.value());
             mcOut.set(rlen, clen, mcOut.getRowsPerBlock(), mcOut.getColsPerBlock(), nnz);
         }
 
-        JavaPairRDD<Text, Long> prepinput = pair.values().zipWithIndex(); //zip row index
+//        JavaPairRDD<String, Long> prepinput = input.zipWithIndex(); //zip row index
 
         //convert csv rdd to binary block rdd (w/ partial blocks)
         JavaPairRDD<MatrixIndexes, MatrixBlock> out =
-                prepinput.mapPartitionsToPair(
-                        new CSVToBinaryBlockFunction(mcOut, delim, fill, fillValue, offset));
+                input.mapPartitionsToPair(new StringToBlock(mcOut, delim, fill, fillValue, offset));
 
         return out;
     }
@@ -262,7 +173,7 @@ public class RDDBlockJoinUtils {
         }
     }
 
-    private static class TuplesToPair
+    private static class StringToBlock
             implements PairFlatMapFunction<Iterator<String>, MatrixIndexes, MatrixBlock> {
         private static final long serialVersionUID = -4948430402942717043L;
 
@@ -275,7 +186,7 @@ public class RDDBlockJoinUtils {
         private double _fillValue = 0;
         private int _offset = 0;
 
-        public TuplesToPair(MatrixCharacteristics mc, String delim, boolean fill, double fillValue, int offset) {
+        public StringToBlock(MatrixCharacteristics mc, String delim, boolean fill, double fillValue, int offset) {
             _rlen = mc.getRows();
             _clen = mc.getCols();
             _brlen = mc.getRowsPerBlock();
@@ -296,9 +207,9 @@ public class RDDBlockJoinUtils {
             MatrixBlock[] mb = new MatrixBlock[ncblks];
 
             while (arg0.hasNext()) {
-                String row = arg0.toString();
+                String row = arg0.next();
                 String[] parts = IOUtilFunctions.split(row, _delim);
-                long rowix = Integer.parseInt(parts[0]);
+                long rowix = Integer.parseInt(parts[0]) + 1;
 
                 long rix = UtilFunctions.computeBlockIndex(rowix, _brlen);
                 int pos = UtilFunctions.computeCellInBlock(rowix, _brlen);
@@ -313,7 +224,7 @@ public class RDDBlockJoinUtils {
 
                 //process row data
                 boolean emptyFound = false;
-                for (int cix = 1, pix = 0; cix <= ncblks; cix++) {
+                for (int cix = 1, pix = 1; cix <= ncblks; cix++) {
                     int lclen = (int) UtilFunctions.computeBlockSize(_clen, cix, _bclen);
                     for (int j = 0; j < lclen; j++) {
                         String part = parts[pix++];
@@ -360,8 +271,8 @@ public class RDDBlockJoinUtils {
         }
     }
 
-    private static class CSVToBinaryBlockFunction
-            implements PairFlatMapFunction<Iterator<scala.Tuple2<Text, Long>>, MatrixIndexes, MatrixBlock> {
+    private static class TuplesToPair
+            implements PairFlatMapFunction<Iterator<Tuple2<Integer, String>>, MatrixIndexes, MatrixBlock> {
         private static final long serialVersionUID = -4948430402942717043L;
 
         private long _rlen = -1;
@@ -371,9 +282,8 @@ public class RDDBlockJoinUtils {
         private String _delim = null;
         private boolean _fill = false;
         private double _fillValue = 0;
-        private int _offset = 0;
 
-        public CSVToBinaryBlockFunction(MatrixCharacteristics mc, String delim, boolean fill, double fillValue, int offset) {
+        public TuplesToPair(MatrixCharacteristics mc, String delim, boolean fill, double fillValue) {
             _rlen = mc.getRows();
             _clen = mc.getCols();
             _brlen = mc.getRowsPerBlock();
@@ -381,11 +291,10 @@ public class RDDBlockJoinUtils {
             _delim = delim;
             _fill = fill;
             _fillValue = fillValue;
-            _offset = offset;
         }
 
         @Override
-        public Iterable<scala.Tuple2<MatrixIndexes, MatrixBlock>> call(Iterator<scala.Tuple2<Text, Long>> arg0)
+        public Iterable<scala.Tuple2<MatrixIndexes, MatrixBlock>> call(Iterator<Tuple2<Integer, String>> arg0)
                 throws Exception {
             ArrayList<scala.Tuple2<MatrixIndexes, MatrixBlock>> ret = new ArrayList<scala.Tuple2<MatrixIndexes, MatrixBlock>>();
 
@@ -394,9 +303,10 @@ public class RDDBlockJoinUtils {
             MatrixBlock[] mb = new MatrixBlock[ncblks];
 
             while (arg0.hasNext()) {
-                scala.Tuple2<Text, Long> tmp = arg0.next();
-                String row = tmp._1().toString();
-                long rowix = tmp._2() + 1;
+                Tuple2<Integer, String> itr = arg0.next();
+                String row = itr._2();
+                String[] parts = IOUtilFunctions.split(row, _delim);
+                long rowix = itr._1() + 1;
 
                 long rix = UtilFunctions.computeBlockIndex(rowix, _brlen);
                 int pos = UtilFunctions.computeCellInBlock(rowix, _brlen);
@@ -410,7 +320,6 @@ public class RDDBlockJoinUtils {
                 }
 
                 //process row data
-                String[] parts = IOUtilFunctions.split(row, _delim);
                 boolean emptyFound = false;
                 for (int cix = 1, pix = 0; cix <= ncblks; cix++) {
                     int lclen = (int) UtilFunctions.computeBlockSize(_clen, cix, _bclen);
@@ -442,7 +351,7 @@ public class RDDBlockJoinUtils {
             //create all column blocks (assume dense since csv is dense text format)
             for (int cix = 1; cix <= ncblks; cix++) {
                 int lclen = (int) UtilFunctions.computeBlockSize(_clen, cix, _bclen);
-                ix[cix - 1] = new MatrixIndexes(rix, cix + _offset);
+                ix[cix - 1] = new MatrixIndexes(rix, cix);
                 mb[cix - 1] = new MatrixBlock(lrlen, lclen, false);
             }
         }
@@ -459,22 +368,21 @@ public class RDDBlockJoinUtils {
         }
     }
 
-    private static class CSVAnalysisFunction implements Function<Text, String> {
+    private static class Analyse implements Function<String, String> {
         private static final long serialVersionUID = 2310303223289674477L;
 
-        private Accumulator<Double> _aNnz = null;
+        private Accumulator<Long> _aNnz = null;
         private String _delim = null;
 
-        public CSVAnalysisFunction(Accumulator<Double> aNnz, String delim) {
+        public Analyse(Accumulator<Long> aNnz, String delim) {
             _aNnz = aNnz;
             _delim = delim;
         }
 
         @Override
-        public String call(Text v1)
+        public String call(String line)
                 throws Exception {
             //parse input line
-            String line = v1.toString();
             String[] cols = IOUtilFunctions.split(line, _delim);
 
             //determine number of non-zeros of row (w/o string parsing)
@@ -486,10 +394,28 @@ public class RDDBlockJoinUtils {
             }
 
             //update counters
-            _aNnz.add((double) lnnz);
+            _aNnz.add(lnnz);
 
             return line;
         }
 
+    }
+
+    private static class LongAccu implements AccumulatorParam<Long> {
+
+        @Override
+        public Long addAccumulator(Long t1, Long t2) {
+            return addInPlace(t1, t2);
+        }
+
+        @Override
+        public Long addInPlace(Long r1, Long r2) {
+            return r1 + r2;
+        }
+
+        @Override
+        public Long zero(Long initialValue) {
+            return 0L;
+        }
     }
 }
