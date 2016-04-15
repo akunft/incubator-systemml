@@ -22,6 +22,7 @@ package org.apache.sysml.runtime.instructions.flink;
 import com.google.common.io.Files;
 import org.apache.commons.io.FileUtils;
 import org.apache.sysml.api.DMLScript;
+import org.apache.sysml.runtime.instructions.flink.utils.Paths;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Rule;
@@ -32,7 +33,7 @@ import java.io.File;
 import java.io.IOException;
 
 public class LinearRegressionTest {
-    final static String scriptsPath = "/home/fschueler/Repos/incubator-systemml/scripts";
+    final static String scriptsPath = Paths.SCRIPTS;
     static File tempDir;
 
     @Rule

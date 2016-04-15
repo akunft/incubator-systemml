@@ -23,6 +23,7 @@ import org.apache.sysml.api.DMLScript;
 import org.apache.sysml.runtime.controlprogram.context.ExecutionContextFactory;
 import org.apache.sysml.runtime.controlprogram.context.FlinkExecutionContext;
 import org.apache.sysml.runtime.instructions.cp.VariableCPInstruction;
+import org.apache.sysml.runtime.instructions.flink.utils.Paths;
 import org.junit.Ignore;
 
 /**
@@ -54,7 +55,7 @@ public class MatrixScalarArithmeticFLInstructionTest {
 
     @Ignore
     public void testInstruction() throws Exception {
-        String inputFile = getClass().getClassLoader().getResource("flink/haberman.data").getFile();
+        String inputFile = Paths.resolveResouce("flink/haberman.data");
         String outputFile = "/tmp/" + MatrixScalarArithmeticFLInstructionTest.class.getSimpleName() + "/testInstruction.out";
         DMLScript.rtplatform = DMLScript.RUNTIME_PLATFORM.FLINK;
         FlinkExecutionContext context = (FlinkExecutionContext) ExecutionContextFactory.createContext();

@@ -31,6 +31,7 @@ import org.apache.sysml.runtime.controlprogram.context.ExecutionContextFactory;
 import org.apache.sysml.runtime.controlprogram.context.FlinkExecutionContext;
 import org.apache.sysml.runtime.instructions.cp.VariableCPInstruction;
 import org.apache.sysml.runtime.instructions.flink.utils.DataSetConverterUtils;
+import org.apache.sysml.runtime.instructions.flink.utils.Paths;
 import org.apache.sysml.runtime.instructions.flink.utils.RowIndexedInputFormat;
 import org.apache.sysml.runtime.matrix.MatrixCharacteristics;
 import org.apache.sysml.runtime.matrix.data.MatrixBlock;
@@ -51,7 +52,7 @@ public class TsmmFLInstructionTest {
     @Ignore
     public void testTSMMWithInstructions() throws Exception {
         // input data and blocking parameters
-        String testFile = getClass().getClassLoader().getResource("flink/haberman.data").getFile();
+        String testFile = Paths.resolveResouce("flink/haberman.data");
         String outputPath = "/tmp/sysml/output/tsmm_out.csv";
 
         DMLScript.rtplatform = DMLScript.RUNTIME_PLATFORM.FLINK;
@@ -99,7 +100,7 @@ public class TsmmFLInstructionTest {
     @Ignore
     public void testTSMMWithMLConext() throws Exception {
         // input data and blocking parameters
-        String testFile = getClass().getClassLoader().getResource("flink/haberman.data").getFile();
+        String testFile = Paths.resolveResouce("flink/haberman.data");
         int numRowsPerBlock = 10;
         int numColsPerBlock = 10;
 

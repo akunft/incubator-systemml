@@ -32,6 +32,7 @@ import org.apache.sysml.runtime.functionobjects.Plus;
 import org.apache.sysml.runtime.instructions.cp.CPOperand;
 import org.apache.sysml.runtime.instructions.cp.VariableCPInstruction;
 import org.apache.sysml.runtime.instructions.flink.utils.DataSetConverterUtils;
+import org.apache.sysml.runtime.instructions.flink.utils.Paths;
 import org.apache.sysml.runtime.instructions.flink.utils.RowIndexedInputFormat;
 import org.apache.sysml.runtime.matrix.MatrixCharacteristics;
 import org.apache.sysml.runtime.matrix.data.MatrixBlock;
@@ -57,9 +58,9 @@ public class MapmmFLInstructionTest {
 
     @Ignore
     public void testInstruction() throws Exception {
-        String inputAFile = getClass().getClassLoader().getResource("flink/3-2.data").getFile();
+        String inputAFile = Paths.resolveResouce("flink/3-2.data");
         ;
-        String inputBFile = getClass().getClassLoader().getResource("flink/2-3.data").getFile();
+        String inputBFile = Paths.resolveResouce("flink/2-3.data");
         ;
         String outputFile = "/tmp/test.out";
         DMLScript.rtplatform = DMLScript.RUNTIME_PLATFORM.FLINK;

@@ -31,6 +31,7 @@ import org.apache.sysml.runtime.controlprogram.context.FlinkExecutionContext;
 import org.apache.sysml.runtime.instructions.cp.CPOperand;
 import org.apache.sysml.runtime.instructions.cp.VariableCPInstruction;
 import org.apache.sysml.runtime.instructions.flink.utils.DataSetConverterUtils;
+import org.apache.sysml.runtime.instructions.flink.utils.Paths;
 import org.apache.sysml.runtime.instructions.flink.utils.RowIndexedInputFormat;
 import org.apache.sysml.runtime.matrix.MatrixCharacteristics;
 import org.apache.sysml.runtime.matrix.data.MatrixBlock;
@@ -55,8 +56,8 @@ public class MapmmChainFLInstructionTest {
      */
     @Ignore
     public void testXtXvInstruction() throws Exception {
-        String inputXFile = getClass().getClassLoader().getResource("flink/haberman.data").getFile();
-        String inputVFile = getClass().getClassLoader().getResource("flink/v.csv").getFile();
+        String inputXFile = Paths.resolveResouce("flink/haberman.data");
+        String inputVFile = Paths.resolveResouce("flink/v.csv");
         String outputFile = "/tmp/test.out";
 
         DMLScript.rtplatform = DMLScript.RUNTIME_PLATFORM.FLINK;
@@ -118,9 +119,9 @@ public class MapmmChainFLInstructionTest {
      */
     @Ignore
     public void testXtwXvInstruction() throws Exception {
-        String inputXFile = getClass().getClassLoader().getResource("flink/haberman.data").getFile();
-        String inputVFile = getClass().getClassLoader().getResource("flink/v.csv").getFile();
-        String inputWFile = getClass().getClassLoader().getResource("flink/w.csv").getFile();
+        String inputXFile = Paths.resolveResouce("flink/haberman.data");
+        String inputVFile = Paths.resolveResouce("flink/v.csv");
+        String inputWFile = Paths.resolveResouce("flink/w.csv");
         String outputFile = "/tmp/test.out";
 
         DMLScript.rtplatform = DMLScript.RUNTIME_PLATFORM.FLINK;
@@ -193,9 +194,9 @@ public class MapmmChainFLInstructionTest {
      */
     @Ignore
     public void testXtXvyInstruction() throws Exception {
-        String inputXFile = getClass().getClassLoader().getResource("flink/haberman.data").getFile();
-        String inputVFile = getClass().getClassLoader().getResource("flink/v.csv").getFile();
-        String inputWFile = getClass().getClassLoader().getResource("flink/w.csv").getFile();
+        String inputXFile = Paths.resolveResouce("flink/haberman.data");
+        String inputVFile = Paths.resolveResouce("flink/v.csv");
+        String inputWFile = Paths.resolveResouce("flink/w.csv");
         String outputFile = "/tmp/test.out";
 
         DMLScript.rtplatform = DMLScript.RUNTIME_PLATFORM.FLINK;

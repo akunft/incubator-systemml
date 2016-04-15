@@ -20,16 +20,19 @@
 package org.apache.sysml.runtime.instructions.flink;
 
 import org.apache.sysml.api.DMLScript;
+import org.apache.sysml.runtime.instructions.flink.utils.Paths;
 import org.junit.Test;
 
 public class FlinkExecutionTest {
-    String resourcePath = getClass().getClassLoader().getResource("flink").getPath();
+    String resourcePath = Paths.resolveResouce("flink");
+    String scripts = Paths.SCRIPTS;
+    String conf = Paths.CONF;
 
     @Test
     public void TSMMTest() throws Exception {
         String[] args = {"-f",
-                "/home/fschueler/Repos/incubator-systemml/scripts/myScripts/tsmm.dml",
-                "-config=/home/fschueler/Repos/incubator-systemml/conf/SystemML-config.xml",
+                scripts + "/myScripts/tsmm.dml",
+                "-config=" + conf + "/SystemML-config.xml",
                 "-exec",
                 "hybrid_flink"};
         DMLScript.main(args);
@@ -51,8 +54,8 @@ public class FlinkExecutionTest {
         // map-
 
         String[] args = {
-                "-f", "/home/fschueler/Repos/incubator-systemml/scripts/algorithms/l2-svm.dml",
-                "-config=/home/fschueler/Repos/incubator-systemml/conf/SystemML-config.xml",
+                "-f", scripts + "/algorithms/l2-svm.dml",
+                "-config=" + conf + "/SystemML-config.xml",
                 "-exec", "hybrid_flink",
                 "-nvargs",
                 "X=" + xFile,
@@ -71,8 +74,8 @@ public class FlinkExecutionTest {
         String conf = resourcePath + "/l2-svm-confusion.csv";
 
         String[] args = {
-                "-f", "/home/fschueler/Repos/incubator-systemml/scripts/algorithms/l2-svm-predict.dml",
-                "-config=/home/fschueler/Repos/incubator-systemml/conf/SystemML-config.xml",
+                "-f", scripts + "/algorithms/l2-svm-predict.dml",
+                "-config=" + conf + "/SystemML-config.xml",
                 "-exec", "hybrid_flink",
                 "-nvargs",
                 "X=" + xFile,
